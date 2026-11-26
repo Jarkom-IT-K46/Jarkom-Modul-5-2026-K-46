@@ -1408,3 +1408,113 @@ num      pkts      bytes target     prot opt in     out     source              
 Counter tetap 3 setelah Lilith mengetuk, sehingga Lilith tidak tercatat. Port 22, 23, dan 3306 tetap gagal untuk Lilith karena memang tidak ada layanan di port itu, dan kernel membalas RST. Port 80 dan 8080 tetap berhasil.
 
 <!-- TODO: tambahkan screenshot nc dari Dummy-Plug dan counter SCAN_NERV di Tokyo3-Core -->
+
+## Soal 17
+**Sihir hitam di jalur paket:** Ritsuko meninggalkan memo di meja Gendo. Paket dari Casper ke Zeruel tidak pernah sampai ke Zeruel, karena ada router yang diam-diam mengalihkannya ke tempat lain. "Cari saja router yang menjadi gateway Switch-Terminal." Gendo menyuruhmu meniru router yang diam-diam itu untuk menjebak siapa pun. Di Fuyutsuki, alihkan setiap koneksi TCP dari Magi-Casper ke Zeruel supaya sampai di Pen-Pen. Casper tidak boleh sadar. Balasan yang ia terima harus tetap terlihat datang dari Zeruel. Ping tidak dialihkan. Nyalakan listener port 9000 di Pen-Pen dan Zeruel. Dari Casper, kirim pesan ke IP Zeruel port 9000. Buktikan pesan itu muncul di Pen-Pen, bukan di Zeruel. Tunjukkan juga tabel conntrack di Fuyutsuki.
+
+### Jawaban dan Penjelasan
+
+| Peran | Node | IP |
+|---|---|---|
+| Pengirim | Magi-Casper (Switch-Terminal) | `192.234.4.58` |
+| Tujuan asli | Zeruel (Switch-Monolith) | `192.234.4.82` |
+| Tujuan pengalihan | Pen-Pen (Switch-Medic) | `192.234.3.195` |
+| Router pengalih | Fuyutsuki (gateway Switch-Terminal, `eth1`) | `192.234.4.57` |
+
+#### 1. DNAT di `Fuyutsuki`
+
+```bash
+RULE="PREROUTING -i eth1 -s 192.234.4.58 -d 192.234.4.82 -p tcp -j DNAT --to-destination 192.234.3.195"
+
+command -v conntrack >/dev/null || apk add -q conntrack-tools
+
+iptables -t nat -D $RULE 2>/dev/null
+iptables -t nat -A $RULE
+```
+
+* **`PREROUTING` + `DNAT`** mengubah alamat tujuan paket sebelum keputusan routing. Paket yang semula menuju Zeruel langsung dirutekan ke Pen-Pen lewat `eth2` (Maya).
+* **`-i eth1 -s 192.234.4.58 -d 192.234.4.82`** membatasi pengalihan hanya untuk paket dari Casper yang masuk dari Switch-Terminal dan menuju Zeruel.
+* **`-p tcp`** membuat hanya TCP yang dialihkan. Ping (ICMP) tidak cocok dengan rule, sehingga tetap sampai ke Zeruel.
+* **`--to-destination 192.234.3.195`** tanpa port, sehingga port tujuan tetap 9000.
+* **Casper tidak sadar.** Rule DNAT hanya diperiksa untuk paket pertama sebuah koneksi. Conntrack mencatat terjemahannya, lalu balasan dari Pen-Pen yang lewat Fuyutsuki dikembalikan sumbernya menjadi `192.234.4.82`. Fuyutsuki berada di jalur pergi dan pulang, karena Fuyutsuki adalah gateway Switch-Terminal sekaligus induk Maya.
+* **`conntrack-tools`** dipasang untuk menampilkan tabel conntrack.
+
+#### 2. Listener port 9000 di `Pen-Pen` dan `Zeruel`
+
+```bash
+pkill -f "nc-listener-9000" 2>/dev/null
+pkill -f "nc -d -v -n -l 9000" 2>/dev/null
+: > /root/nc_9000.log
+setsid sh -c "while true; do nc -d -v -n -l 9000 >> /root/nc_9000.log 2>&1; done # nc-listener-9000" \
+    < /dev/null > /dev/null 2>&1 &
+```
+
+Polanya sama dengan soal 8. `-d` membuat `nc` hanya menerima tanpa membaca stdin, dan `-v` mencatat IP pengirim.
+
+#### 3. Pengirim di `Magi-Casper`
+
+```bash
+echo "Pesan rahasia Casper untuk Zeruel" | nc -v -n -N -w 3 192.234.4.82 9000
+echo "exit=$?"
+ping -c 3 192.234.4.82
+```
+
+Script lengkap ada di `perquest-scripts/soal_17/` dan dijalankan di node sebagai `/root/soal_17.sh`. Tabel conntrack dan counter dikosongkan dulu (`conntrack -F`, `iptables -t nat -Z PREROUTING`) sebelum pengujian.
+
+### Verifikasi
+
+#### 1. Yang dilihat `Magi-Casper`
+
+```
+Connection to 192.234.4.82 9000 port [tcp/*] succeeded!
+exit=0
+3 packets transmitted, 3 received, 0% packet loss, time 2237ms
+```
+
+Casper melihat koneksinya berhasil ke `192.234.4.82` (Zeruel), dan ping ke Zeruel tetap dijawab.
+
+#### 2. Pesan muncul di `Pen-Pen`, bukan di `Zeruel`
+
+**Pen-Pen** (`/root/nc_9000.log`):
+
+```
+Listening on 0.0.0.0 9000
+Connection received on 192.234.4.58 51360
+Pesan rahasia Casper untuk Zeruel
+Listening on 0.0.0.0 9000
+```
+
+**Zeruel** (`/root/nc_9000.log`):
+
+```
+Listening on 0.0.0.0 9000
+```
+
+Pesan dari Casper (`192.234.4.58`) diterima Pen-Pen, sedangkan Zeruel tidak menerima koneksi apa pun.
+
+#### 3. Tabel conntrack di `Fuyutsuki`
+
+```
+$ conntrack -L -p tcp
+tcp      6 117 TIME_WAIT src=192.234.4.58 dst=192.234.4.82 sport=51360 dport=9000 src=192.234.3.195 dst=192.234.4.58 sport=9000 dport=51360 [ASSURED] mark=0 use=1
+
+$ conntrack -L -p icmp
+icmp     1 29 src=192.234.4.58 dst=192.234.4.82 type=8 code=0 id=389 src=192.234.4.82 dst=192.234.4.58 type=0 code=0 id=389 mark=0 use=1
+```
+
+Setiap entri conntrack berisi dua arah, yaitu arah asli lalu arah balasan yang diharapkan:
+
+| Entri | Arah asli | Arah balasan | Arti |
+|---|---|---|---|
+| TCP 9000 | `src=192.234.4.58 dst=192.234.4.82` | `src=192.234.3.195 dst=192.234.4.58` | Casper mengirim ke Zeruel, tetapi balasan datang dari Pen-Pen. Ini bukti DNAT. Fuyutsuki mengganti sumber balasan menjadi Zeruel sebelum diteruskan ke Casper. |
+| ICMP | `src=192.234.4.58 dst=192.234.4.82` | `src=192.234.4.82 dst=192.234.4.58` | Ping dijawab oleh Zeruel sendiri, sehingga tidak dialihkan. |
+
+```
+Chain PREROUTING (policy ACCEPT 1 packets, 84 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination
+1           1       60 DNAT       tcp  --  eth1   *       192.234.4.58         192.234.4.82         to:192.234.3.195
+```
+
+Counter DNAT hanya bertambah 1, yaitu paket SYN pembuka koneksi TCP. Paket berikutnya ditangani conntrack. Paket ping pertama (84 byte) tercatat di policy `ACCEPT`, bukan di rule DNAT.
+
+<!-- TODO: tambahkan screenshot log Pen-Pen dan Zeruel serta conntrack -L di Fuyutsuki -->
