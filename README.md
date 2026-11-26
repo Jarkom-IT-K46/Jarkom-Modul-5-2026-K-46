@@ -1292,3 +1292,119 @@ $ ping -c 3 192.234.4.74
 Counter `INPUT` tetap 55 (50 + 5 dari Lilith) setelah ping ini. Balasan `echo-reply` dari Lilith tidak masuk ke `PING_LIMIT`, sehingga ping keluar Tokyo3-Core tidak terkena batas.
 
 <!-- TODO: tambahkan screenshot ping rapat dari Lilith dan counter iptables di Tokyo3-Core -->
+
+## Soal 16
+**Pencuri yang mencoba setiap pintu:** dari Switch-Lab, Dummy-Plug mengetuk port sensitif Tokyo3-Core satu per satu seperti pencuri. Ritsuko ingin tahu setiap percobaannya, dan pintunya harus dibanting. Setiap koneksi TCP dari Dummy-Plug ke port 22, 23, dan 3306 di Tokyo3-Core harus dicatat di log dengan prefix huruf besar `SCAN-NERV:`, lalu ditolak seketika. Port 80 dan 8080 tetap bisa diakses, dan klien lain tidak boleh terganggu. Buktikan `nc -w` dari Dummy-Plug ke port 22, 23, dan 3306 langsung ditolak, dan ke port 80 dan 8080 berhasil. Tunjukkan counter rule pencatatan, karena log kernel sering tidak terlihat di container.
+
+### Jawaban dan Penjelasan
+
+#### 1. Rule di `Tokyo3-Core`
+
+```bash
+DUMMY=192.234.4.51
+
+# Chain khusus agar aman dijalankan berulang
+iptables -N SCAN_NERV 2>/dev/null
+iptables -F SCAN_NERV
+iptables -A SCAN_NERV -j LOG --log-prefix "SCAN-NERV: "
+iptables -A SCAN_NERV -p tcp -j REJECT --reject-with tcp-reset
+
+iptables -D INPUT -s $DUMMY -p tcp -m multiport --dports 22,23,3306 \
+    -m conntrack --ctstate NEW -j SCAN_NERV 2>/dev/null
+iptables -I INPUT 1 -s $DUMMY -p tcp -m multiport --dports 22,23,3306 \
+    -m conntrack --ctstate NEW -j SCAN_NERV
+```
+
+* **Pencocokan.** Rule hanya mengenai paket TCP dari Dummy-Plug (`192.234.4.51`) ke port 22, 23, dan 3306. Port 80 dan 8080, serta klien selain Dummy-Plug, tidak cocok dengan rule ini sehingga tidak terganggu.
+* **`--ctstate NEW`** mencatat setiap percobaan koneksi baru satu kali, bukan setiap paketnya.
+* **`LOG --log-prefix "SCAN-NERV: "`** menulis percobaan ke log kernel. `LOG` tidak menghentikan pemrosesan, sehingga paket diteruskan ke rule berikutnya di chain.
+* **`REJECT --reject-with tcp-reset`** membalas dengan TCP RST. Klien langsung mendapat `Connection refused`, tidak menunggu sampai timeout seperti pada `DROP`. Inilah "pintu dibanting".
+* **Urutan.** Rule dipasang di posisi 1 INPUT, sebelum `PING_LIMIT` dari soal 15, agar tidak didahului rule lain. Urutan `LOG` lalu `REJECT` di dalam chain memastikan setiap paket dicatat sebelum ditolak.
+
+Rule dipasang ulang dengan menjalankan script, sama seperti soal 15.
+
+#### 2. Pengujian
+
+Dummy-Plug dan Lilith (sebagai klien lain) menjalankan `nc` ke kelima port:
+
+```bash
+probe() {
+    start=$(date +%s%N)
+    out=$(nc -v -n -w 5 $1 $2 < /dev/null 2>&1)
+    rc=$?
+    ms=$(( ($(date +%s%N) - start) / 1000000 ))
+    echo "== $1:$2 exit=$rc durasi=${ms}ms"
+    echo "$out"
+}
+
+for port in 22 23 3306 80 8080; do
+    probe 192.234.4.106 $port
+done
+```
+
+Listener port 80 dan 8080 dari soal 8 dijalankan ulang dulu dengan `sh /root/soal_8.sh` di Tokyo3-Core.
+
+Script lengkap ada di `perquest-scripts/soal_16/` dan dijalankan di node sebagai `/root/soal_16.sh`.
+
+### Verifikasi
+
+#### 1. `nc` dari `Dummy-Plug`
+
+```
+== 192.234.4.106:22 exit=1 durasi=3ms
+nc: connect to 192.234.4.106 port 22 (tcp) failed: Connection refused
+== 192.234.4.106:23 exit=1 durasi=2ms
+nc: connect to 192.234.4.106 port 23 (tcp) failed: Connection refused
+== 192.234.4.106:3306 exit=1 durasi=3ms
+nc: connect to 192.234.4.106 port 3306 (tcp) failed: Connection refused
+== 192.234.4.106:80 exit=0 durasi=3ms
+Connection to 192.234.4.106 80 port [tcp/*] succeeded!
+Welcome to Tokyo3-Core
+== 192.234.4.106:8080 exit=0 durasi=3ms
+Connection to 192.234.4.106 8080 port [tcp/*] succeeded!
+syifa imutz
+```
+
+Port 22, 23, dan 3306 ditolak dalam 2 sampai 3 ms, jauh di bawah batas `-w 5`. Port 80 dan 8080 tetap menjawab.
+
+#### 2. Counter rule pencatatan
+
+Counter direset dengan `iptables -Z` sebelum pengujian. Setelah Dummy-Plug mengetuk:
+
+```
+Chain SCAN_NERV (1 references)
+num      pkts      bytes target     prot opt in     out     source               destination
+1           3      180 LOG        all  --  *      *       0.0.0.0/0            0.0.0.0/0            LOG flags 0 level 4 prefix "SCAN-NERV: "
+2           3      180 REJECT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            reject-with tcp-reset
+```
+
+Rule `LOG` naik 3, satu untuk setiap port 22, 23, dan 3306. Rule `REJECT` juga naik 3, sehingga setiap percobaan dicatat lalu ditolak. Seperti yang disebut soal, baris log `SCAN-NERV:` tidak muncul di `dmesg` container, sehingga counter inilah buktinya.
+
+#### 3. Klien lain tidak terganggu
+
+`Lilith` menjalankan pengujian yang sama:
+
+```
+== 192.234.4.106:22 exit=1 durasi=5ms
+nc: connect to 192.234.4.106 port 22 (tcp) failed: Connection refused
+== 192.234.4.106:23 exit=1 durasi=4ms
+nc: connect to 192.234.4.106 port 23 (tcp) failed: Connection refused
+== 192.234.4.106:3306 exit=1 durasi=3ms
+nc: connect to 192.234.4.106 port 3306 (tcp) failed: Connection refused
+== 192.234.4.106:80 exit=0 durasi=3ms
+Connection to 192.234.4.106 80 port [tcp/*] succeeded!
+Welcome to Tokyo3-Core
+== 192.234.4.106:8080 exit=0 durasi=3ms
+Connection to 192.234.4.106 8080 port [tcp/*] succeeded!
+syifa imutz
+```
+
+```
+Chain INPUT (policy ACCEPT 19 packets, 1044 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination
+1           3      180 SCAN_NERV  tcp  --  *      *       192.234.4.51         0.0.0.0/0            multiport dports 22,23,3306 ctstate NEW
+```
+
+Counter tetap 3 setelah Lilith mengetuk, sehingga Lilith tidak tercatat. Port 22, 23, dan 3306 tetap gagal untuk Lilith karena memang tidak ada layanan di port itu, dan kernel membalas RST. Port 80 dan 8080 tetap berhasil.
+
+<!-- TODO: tambahkan screenshot nc dari Dummy-Plug dan counter SCAN_NERV di Tokyo3-Core -->
