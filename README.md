@@ -1185,3 +1185,109 @@ Listening on 0.0.0.0 8080
 Setiap koneksi tercatat dari `192.234.4.74` (Lilith), dan listener langsung siap lagi untuk koneksi berikutnya.
 
 <!-- TODO: tambahkan screenshot nc dari Lilith ke port 80, 8080, dan 22 -->
+
+## Soal 15
+**Banjir ping di pusat komando:** Instrumentality makin dekat, dan semua orang berebut mem-ping Tokyo3-Core. Banjir ping bisa melumpuhkannya. Batasi Tokyo3-Core agar hanya menjawab maksimal 5 ping per detik, dan buang kelebihannya. Aturan ini tidak boleh mengganggu ping di bawah batas. Aturan ini juga tidak boleh membatasi ping yang dikirim Tokyo3-Core sendiri. Pastikan rule benar-benar mengenai paket yang dituju. Periksa urutan rule dan jenis paketnya. Buktikan ping rapat dari Lilith, misalnya `ping -i 0.1 -c50`, sebagian hilang, dan tunjukkan counter rule pembuangan naik. Buktikan ping biasa semuanya berhasil, dengan jeda minimal 3 detik di antaranya.
+
+### Jawaban dan Penjelasan
+
+#### 1. Rule di `Tokyo3-Core`
+
+```bash
+# Chain khusus agar aman dijalankan berulang
+iptables -N PING_LIMIT 2>/dev/null
+iptables -F PING_LIMIT
+iptables -A PING_LIMIT -m limit --limit 5/second --limit-burst 5 -j ACCEPT
+iptables -A PING_LIMIT -j DROP
+
+iptables -D INPUT -p icmp --icmp-type echo-request -j PING_LIMIT 2>/dev/null
+iptables -I INPUT 1 -p icmp --icmp-type echo-request -j PING_LIMIT
+```
+
+* **Jenis paket.** Hanya `echo-request` (ICMP type 8) yang masuk ke chain `PING_LIMIT`. Saat Tokyo3-Core mengirim ping, paket yang kembali kepadanya adalah `echo-reply` (type 0). Paket itu tidak cocok dengan rule, sehingga ping keluar tidak ikut terbatasi.
+* **Batas.** Modul `limit` memakai token bucket. `--limit 5/second` mengisi 5 token per detik, dan `--limit-burst 5` menampung paling banyak 5 token. Setiap ping memakai satu token. Ping yang datang saat token habis jatuh ke rule `DROP`.
+* **Urutan.** Rule dipasang di posisi 1 INPUT (`-I INPUT 1`). Conntrack menganggap ping kedua dan seterusnya dengan id yang sama sebagai `ESTABLISHED`. Jika nanti ada rule `ACCEPT ESTABLISHED,RELATED` di atasnya, banjir ping akan lolos tanpa melewati batas.
+* **Ping di bawah batas.** Ping dengan jeda 3 detik selalu mendapat token, karena bucket sudah terisi penuh lagi dalam 1 detik.
+* **Aman dijalankan berulang.** Chain dibersihkan dengan `-F`, dan rule lompat ke chain dihapus dulu dengan `-D` sebelum dipasang lagi.
+
+#### 2. Persistensi
+
+```bash
+iptables-save > /etc/iptables.rules
+grep -q iptables-restore /etc/network/interfaces ||
+    sed -i '/^iface eth0 inet static/a\    up iptables-restore < /etc/iptables.rules' /etc/network/interfaces
+```
+
+Rule dipulihkan setiap kali `eth0` Tokyo3-Core naik.
+
+#### 3. Pengujian dari `Lilith`
+
+```bash
+ping -i 0.1 -c 50 192.234.4.106   # 10 ping per detik
+sleep 3                           # tunggu token terisi kembali
+ping -i 3 -c 5 192.234.4.106      # jeda 3 detik
+```
+
+`sleep 3` memastikan ping biasa tidak berangkat saat bucket masih kosong sisa ping rapat.
+
+Script lengkap ada di `perquest-scripts/soal_15/` dan dijalankan di node sebagai `/root/soal_15.sh`.
+
+### Verifikasi
+
+#### 1. Rule di `Tokyo3-Core`
+
+```
+$ iptables -S
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+-N PING_LIMIT
+-A INPUT -p icmp -m icmp --icmp-type 8 -j PING_LIMIT
+-A PING_LIMIT -m limit --limit 5/sec -j ACCEPT
+-A PING_LIMIT -j DROP
+```
+
+#### 2. Ping dari `Lilith`
+
+Counter direset dengan `iptables -Z` sebelum pengujian.
+
+```
+== ping rapat: 10 ping/detik, sebagian harus hilang
+50 packets transmitted, 30 received, 40% packet loss, time 5650ms
+rtt min/avg/max/mdev = 0.491/0.872/1.381/0.233 ms
+== ping biasa: jeda 3 detik, semua harus berhasil
+5 packets transmitted, 5 received, 0% packet loss, time 13369ms
+rtt min/avg/max/mdev = 0.416/0.692/1.240/0.283 ms
+```
+
+Ping rapat berlangsung sekitar 5,6 detik. Yang dijawab hanya 30 ping, yaitu 5 dari burst awal ditambah kira-kira 5 per detik. 20 ping lainnya dibuang.
+
+#### 3. Counter rule
+
+```
+Chain INPUT (policy ACCEPT 0 packets, 0 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination
+1          55     4620 PING_LIMIT  icmp --  *      *       0.0.0.0/0            0.0.0.0/0            icmptype 8
+Chain PING_LIMIT (1 references)
+num      pkts      bytes target     prot opt in     out     source               destination
+1          35     2940 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            limit: avg 5/sec burst 5
+2          20     1680 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0
+```
+
+| Rule | Sebelum | Sesudah | Keterangan |
+|---|---|---|---|
+| `ACCEPT` (limit) | 0 | 35 | 30 ping rapat + 5 ping biasa |
+| `DROP` | 0 | 20 | 20 ping rapat yang hilang |
+
+Counter `DROP` naik tepat sebanyak ping rapat yang hilang (50 - 30 = 20), dan tidak ada ping biasa yang terbuang.
+
+#### 4. Ping dari `Tokyo3-Core` tidak terbatasi
+
+```
+$ ping -c 3 192.234.4.74
+3 packets transmitted, 3 received, 0% packet loss, time 2269ms
+```
+
+Counter `INPUT` tetap 55 (50 + 5 dari Lilith) setelah ping ini. Balasan `echo-reply` dari Lilith tidak masuk ke `PING_LIMIT`, sehingga ping keluar Tokyo3-Core tidak terkena batas.
+
+<!-- TODO: tambahkan screenshot ping rapat dari Lilith dan counter iptables di Tokyo3-Core -->
