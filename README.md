@@ -1634,3 +1634,174 @@ num      pkts      bytes target     prot opt in     out     source              
 | `DROP` | 9 | 6 ping Lilith dan 3 percobaan SYN dari `nc` Lilith |
 
 <!-- TODO: tambahkan screenshot ping Casper dan Lilith ke Zeruel serta counter ZONA_GATE -->
+
+## Soal 19
+**Hukuman untuk sang pengkhianat:** hitung mundur tinggal beberapa menit. Armisael tidak boleh lagi bicara dengan siapa pun, tapi Zeruel di sebelahnya tidak boleh ikut terhukum. Blokir semua lalu lintas masuk dan keluar Armisael, termasuk ke gateway dan tetangga satu switch. Isolasi tidak boleh dikerjakan di dalam Armisael, karena pengkhianat tidak bisa dipercaya. Untuk uji nc, nyalakan listener TCP 9000 di Armisael, Zeruel, dan Lilith. Ke Seele pakai TCP 53. Buktikan ping dan nc dari Armisael ke Seele, Zeruel, dan Lilith gagal. Buktikan ping dan nc dari Zeruel ke Seele dan Lilith berhasil.
+
+### Jawaban dan Penjelasan
+
+Armisael (`192.234.4.83`, MAC `02:42:9e:4d:4b:00`) dan Zeruel (`192.234.4.82`) berada di Switch-Monolith dengan gateway Shigeru (`192.234.4.81`).
+
+Lalu lintas Armisael terbagi menjadi dua jalur:
+
+| Tujuan | Jalur | Tempat blokir |
+|---|---|---|
+| Gateway Shigeru, Lilith, Seele, dan semua di luar switch | Lewat Shigeru | Shigeru (INPUT, OUTPUT, FORWARD) |
+| Zeruel (satu switch) | Langsung lewat switch, tidak melewati router | Zeruel (INPUT, OUTPUT) |
+
+Switch GNS3 tidak bisa memfilter, dan isolasi tidak boleh dikerjakan di Armisael. Karena itu, blokir untuk tetangga satu switch dipasang di Zeruel sendiri. Zeruel hanya membuang lalu lintas dari dan ke Armisael, sehingga Zeruel tidak ikut terhukum.
+
+#### 1. Rule di `Shigeru`
+
+```bash
+ARMISAEL_IP=192.234.4.83
+ARMISAEL_MAC=02:42:9e:4d:4b:00
+
+# Paket dari Armisael (MAC dan IP), dipakai di INPUT dan FORWARD
+iptables -N ISOLASI_MASUK 2>/dev/null
+iptables -F ISOLASI_MASUK
+iptables -A ISOLASI_MASUK -m mac --mac-source $ARMISAEL_MAC -j DROP
+iptables -A ISOLASI_MASUK -s $ARMISAEL_IP -j DROP
+
+# Paket menuju Armisael, dipakai di OUTPUT dan FORWARD
+iptables -N ISOLASI_KELUAR 2>/dev/null
+iptables -F ISOLASI_KELUAR
+iptables -A ISOLASI_KELUAR -d $ARMISAEL_IP -j DROP
+
+for CH in INPUT FORWARD; do
+    iptables -D $CH -j ISOLASI_MASUK 2>/dev/null
+    iptables -I $CH 1 -j ISOLASI_MASUK
+done
+for CH in OUTPUT FORWARD; do
+    iptables -D $CH -j ISOLASI_KELUAR 2>/dev/null
+    iptables -I $CH 1 -j ISOLASI_KELUAR
+done
+```
+
+* **MAC dan IP.** Paket dari Armisael dikenali dari MAC sumbernya, sehingga pengkhianat tidak bisa lolos hanya dengan mengganti IP. Rule IP sumber menjadi lapis tambahan.
+* **Dua chain.** Match `mac` hanya berlaku untuk paket yang masuk dari interface (INPUT, FORWARD, PREROUTING). Jika dipakai di OUTPUT, iptables menolak dengan `RULE_INSERT failed (Invalid argument)`. Karena itu, paket menuju Armisael dicocokkan dengan IP tujuan di chain terpisah.
+* **INPUT dan OUTPUT** memutus Armisael dari Shigeru sebagai gateway. **FORWARD** memutus Armisael dari semua tujuan di luar switch, ke dua arah.
+* **Urutan.** Kedua chain dipasang di posisi 1, sebelum `ZONA_GATE` dari soal 18, sehingga tidak ada rule ACCEPT yang mendahuluinya.
+
+#### 2. Rule di `Zeruel`
+
+```bash
+iptables -N ISOLASI_MASUK 2>/dev/null
+iptables -F ISOLASI_MASUK
+iptables -A ISOLASI_MASUK -m mac --mac-source $ARMISAEL_MAC -j DROP
+iptables -A ISOLASI_MASUK -s $ARMISAEL_IP -j DROP
+iptables -D INPUT -j ISOLASI_MASUK 2>/dev/null
+iptables -I INPUT 1 -j ISOLASI_MASUK
+
+iptables -N ISOLASI_KELUAR 2>/dev/null
+iptables -F ISOLASI_KELUAR
+iptables -A ISOLASI_KELUAR -d $ARMISAEL_IP -j DROP
+iptables -D OUTPUT -j ISOLASI_KELUAR 2>/dev/null
+iptables -I OUTPUT 1 -j ISOLASI_KELUAR
+```
+
+Polanya sama dengan Shigeru, tetapi tanpa FORWARD karena Zeruel bukan router.
+
+#### 3. Listener dan uji
+
+Listener TCP 9000 di Armisael, Zeruel, dan Lilith memakai pola soal 17 (`nc -d -v -n -l 9000` dalam loop, dicatat di `/root/nc_9000.log`). Di Armisael hanya dijalankan listener dan perintah uji, tanpa rule apa pun (`iptables -S` Armisael kosong).
+
+```bash
+ping -c 3 -W 2 8.8.8.8
+nc -v -n -z -w 3 8.8.8.8 53
+ping -c 3 -W 2 <Zeruel / Lilith>
+echo "Halo dari ..." | nc -v -n -N -w 3 <Zeruel / Lilith> 9000
+```
+
+Script lengkap ada di `perquest-scripts/soal_19/` dan dijalankan di node sebagai `/root/soal_19.sh`.
+
+### Verifikasi
+
+#### 1. Dari `Armisael`: semua gagal
+
+```
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+== ping Seele 8.8.8.8
+3 packets transmitted, 0 received, 100% packet loss, time 2281ms
+== nc Seele 8.8.8.8:53
+nc: connect to 8.8.8.8 port 53 (tcp) timed out: Operation in progress
+exit=1
+== ping Zeruel
+3 packets transmitted, 0 received, 100% packet loss, time 2258ms
+== nc Zeruel:9000
+nc: connect to 192.234.4.82 port 9000 (tcp) timed out: Operation in progress
+exit=1
+== ping Lilith
+3 packets transmitted, 0 received, 100% packet loss, time 2259ms
+== nc Lilith:9000
+nc: connect to 192.234.4.74 port 9000 (tcp) timed out: Operation in progress
+exit=1
+== ping gateway Shigeru
+3 packets transmitted, 0 received, 100% packet loss, time 2258ms
+```
+
+Tiga baris pertama menunjukkan Armisael sendiri tidak punya rule iptables, jadi isolasi tidak dikerjakan di dalam Armisael.
+
+#### 2. Dari `Zeruel`: Seele dan Lilith berhasil
+
+```
+== ping Seele 8.8.8.8
+3 packets transmitted, 3 received, 0% packet loss, time 2219ms
+== nc Seele 8.8.8.8:53
+Connection to 8.8.8.8 53 port [tcp/*] succeeded!
+exit=0
+== ping Lilith
+3 packets transmitted, 3 received, 0% packet loss, time 2249ms
+== nc Lilith:9000
+Connection to 192.234.4.74 9000 port [tcp/*] succeeded!
+exit=0
+```
+
+Zeruel juga tidak bisa menjangkau Armisael, karena hubungan dengan Armisael diputus dari dua arah:
+
+```
+$ ping -c 2 -W 2 192.234.4.83
+2 packets transmitted, 0 received, 100% packet loss, time 1135ms
+$ echo x | nc -v -n -N -w 3 192.234.4.83 9000
+nc: connect to 192.234.4.83 port 9000 (tcp) timed out: Operation in progress
+exit=1
+```
+
+#### 3. Log listener
+
+| Node | Isi `/root/nc_9000.log` |
+|---|---|
+| Lilith | `Connection received on 192.234.4.82` lalu `Halo dari Zeruel` (pesan Armisael tidak ada) |
+| Zeruel | Hanya `Listening on 0.0.0.0 9000` (pesan Armisael tidak sampai) |
+| Armisael | Hanya `Listening on 0.0.0.0 9000` (pesan Zeruel tidak sampai) |
+
+#### 4. Counter
+
+**Shigeru:**
+
+```
+Chain ISOLASI_MASUK (2 references)
+    pkts      bytes target     prot opt in     out     source               destination
+      15     1116 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            MAC 02:42:9e:4d:4b:00
+       0        0 DROP       all  --  *      *       192.234.4.83         0.0.0.0/0
+```
+
+15 paket dari Armisael dibuang berdasarkan MAC: ping Seele (3), SYN ke port 53 (3), ping Lilith (3), SYN ke Lilith (3), dan ping gateway (3).
+
+**Zeruel:**
+
+```
+Chain ISOLASI_MASUK (1 references)
+    pkts      bytes target     prot opt in     out     source               destination
+       6      432 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            MAC 02:42:9e:4d:4b:00
+       0        0 DROP       all  --  *      *       192.234.4.83         0.0.0.0/0
+Chain ISOLASI_KELUAR (1 references)
+    pkts      bytes target     prot opt in     out     source               destination
+       5      348 DROP       all  --  *      *       0.0.0.0/0            192.234.4.83
+```
+
+Zeruel membuang 6 paket dari Armisael (ping 3 dan SYN 3), serta 5 paket miliknya sendiri menuju Armisael (ping 2 dan SYN 3).
+
+<!-- TODO: tambahkan screenshot uji dari Armisael dan Zeruel serta counter isolasi -->
