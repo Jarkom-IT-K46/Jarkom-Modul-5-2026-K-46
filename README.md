@@ -1518,3 +1518,119 @@ num      pkts      bytes target     prot opt in     out     source              
 Counter DNAT hanya bertambah 1, yaitu paket SYN pembuka koneksi TCP. Paket berikutnya ditangani conntrack. Paket ping pertama (84 byte) tercatat di policy `ACCEPT`, bukan di rule DNAT.
 
 <!-- TODO: tambahkan screenshot log Pen-Pen dan Zeruel serta conntrack -L di Fuyutsuki -->
+
+## Soal 18
+**Gerbang Monolith dan Radar:** Monolith dan Radar menyimpan rahasia terbesar NERV, dan Shigeru menjaganya tanpa kompromi. Pasang aturan di Shigeru. Node di dalam zona boleh memulai koneksi ke mana saja, dan balasannya tetap sampai. Node di luar zona tidak boleh memulai koneksi ke dalam zona. Satu pengecualian: ping dari subnet Terminal boleh masuk. Tolak berdasarkan arah datangnya, yaitu semua yang datang dari sisi Shigeru yang menghadap Gendo. Jangan menulis subnet luar satu per satu, supaya subnet baru langsung ikut terblokir. Buktikan ping Casper ke Zeruel berhasil, sedangkan ping Lilith ke Zeruel gagal.
+
+### Jawaban dan Penjelasan
+
+Interface Shigeru:
+
+| Interface | Arah | Subnet |
+|---|---|---|
+| `eth0` | Ke Gendou (luar zona) | L15 `192.234.4.164/30` |
+| `eth1` | Switch-Monolith (zona) | `192.234.4.80/29` |
+| `eth2` | Ke Makoto, Switch-Radar (zona) | L11 `192.234.4.148/30`, Radar `192.234.4.88/29` |
+
+#### 1. Rule di `Shigeru`
+
+```bash
+TERMINAL=192.234.4.56/29
+
+iptables -N ZONA_GATE 2>/dev/null
+iptables -F ZONA_GATE
+iptables -A ZONA_GATE -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A ZONA_GATE -s $TERMINAL -p icmp --icmp-type echo-request -j ACCEPT
+iptables -A ZONA_GATE -j DROP
+
+iptables -D FORWARD -i eth0 -j ZONA_GATE 2>/dev/null
+iptables -I FORWARD 1 -i eth0 -j ZONA_GATE
+```
+
+* **Berdasarkan arah datang.** Semua paket yang diteruskan dan masuk dari `eth0` (sisi Gendou) diperiksa di chain `ZONA_GATE`. Subnet luar tidak ditulis satu per satu, sehingga subnet baru di balik Gendou langsung ikut tertolak.
+* **`ESTABLISHED,RELATED`** meloloskan balasan untuk koneksi yang dimulai dari dalam zona, termasuk balasan dari internet.
+* **Pengecualian Terminal.** Hanya `echo-request` dari `192.234.4.56/29` (Magi-Casper, Balthasar, Melchior) yang boleh membuka koneksi baru. Balasan dan request ping berikutnya sudah tertangani rule `ESTABLISHED`.
+* **`DROP`** membuang koneksi baru lain dari luar zona.
+* **Dari dalam zona tidak terkena.** Paket dari Monolith atau Radar yang keluar ke `eth0`, serta antara Monolith dan Radar (`eth1` ke `eth2`), tidak masuk lewat `eth0`. Jadi paket-paket itu tidak melewati `ZONA_GATE`.
+* Rule dipasang di posisi 1 FORWARD. Chain khusus membuat script aman dijalankan berulang.
+
+#### 2. Pengujian
+
+* **Magi-Casper** (Terminal): ping Zeruel dan Radar-Array, seharusnya berhasil.
+* **Lilith** (luar zona): ping Zeruel dan Radar-Array, serta `nc` ke Zeruel port 9000, seharusnya gagal.
+* **Zeruel** (dalam zona): ping 8.8.8.8, ping Lilith, `nc` ke Tokyo3-Core port 80, dan ping Radar-Array, seharusnya semua berhasil.
+
+Script lengkap ada di `perquest-scripts/soal_18/` dan dijalankan di node sebagai `/root/soal_18.sh`.
+
+### Verifikasi
+
+#### 1. Sebelum rule dipasang
+
+Lilith masih bisa menjangkau zona:
+
+```
+== ping Zeruel (Monolith)
+3 packets transmitted, 3 received, 0% packet loss, time 2224ms
+== ping Radar-Array (Radar)
+3 packets transmitted, 3 received, 0% packet loss, time 2278ms
+== nc Zeruel port 9000
+Connection to 192.234.4.82 9000 port [tcp/*] succeeded!
+```
+
+#### 2. Setelah rule dipasang
+
+**Magi-Casper** (subnet Terminal):
+
+```
+== ping Zeruel (Monolith)
+3 packets transmitted, 3 received, 0% packet loss, time 2233ms
+== ping Radar-Array (Radar)
+3 packets transmitted, 3 received, 0% packet loss, time 2223ms
+```
+
+**Lilith** (luar zona):
+
+```
+== ping Zeruel (Monolith)
+3 packets transmitted, 0 received, 100% packet loss, time 2279ms
+== ping Radar-Array (Radar)
+3 packets transmitted, 0 received, 100% packet loss, time 2253ms
+== nc Zeruel port 9000
+nc: connect to 192.234.4.82 port 9000 (tcp) timed out: Operation in progress
+exit=1
+```
+
+**Zeruel** (dalam zona):
+
+```
+== ping 8.8.8.8 (internet)
+3 packets transmitted, 3 received, 0% packet loss, time 2220ms
+== ping Lilith
+3 packets transmitted, 3 received, 0% packet loss, time 2278ms
+== nc Tokyo3-Core port 80
+Connection to 192.234.4.106 80 port [tcp/*] succeeded!
+Welcome to Tokyo3-Core
+exit=0
+== ping Radar-Array (sesama zona)
+3 packets transmitted, 3 received, 0% packet loss, time 2223ms
+```
+
+Ping Casper ke Zeruel berhasil, sedangkan ping Lilith ke Zeruel gagal. Zeruel tetap bisa memulai koneksi ke luar dan menerima balasannya. Lilith gagal membalas ke zona hanya untuk koneksi yang ia mulai sendiri. Saat Zeruel yang memulai ping ke Lilith, balasan Lilith lolos sebagai `ESTABLISHED`.
+
+#### 3. Counter `ZONA_GATE`
+
+```
+Chain ZONA_GATE (1 references)
+num      pkts      bytes target     prot opt in     out     source               destination
+1          14     1079 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+2           2      168 ACCEPT     icmp --  *      *       192.234.4.56/29      0.0.0.0/0            icmptype 8
+3           9      684 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0
+```
+
+| Rule | Counter | Asal |
+|---|---|---|
+| `ESTABLISHED,RELATED` | 14 | Request lanjutan ping Casper, dan balasan untuk koneksi yang dimulai Zeruel |
+| Ping Terminal | 2 | Request pertama dari dua ping Casper (ke Zeruel dan Radar-Array) |
+| `DROP` | 9 | 6 ping Lilith dan 3 percobaan SYN dari `nc` Lilith |
+
+<!-- TODO: tambahkan screenshot ping Casper dan Lilith ke Zeruel serta counter ZONA_GATE -->
