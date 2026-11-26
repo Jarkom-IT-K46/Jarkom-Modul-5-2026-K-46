@@ -637,6 +637,8 @@ iface eth0 inet dhcp
     up iptables -t nat -C POSTROUTING -s 192.234.0.0/16 -o eth0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 192.234.0.0/16 -o eth0 -j MASQUERADE
 ```
 
+Pada soal 5, seluruh konfigurasi Gendou dipindahkan ke `gendo.sh`, dan rule MASQUERADE dipasang ulang dengan menjalankan script tersebut (lihat soal 5).
+
 #### 2. DNS
 
 * **Gendou** memakai nameserver dari DHCP NAT1 (`192.168.122.1`), yang diperbarui otomatis oleh `udhcpc`.
@@ -706,7 +708,7 @@ Seluruh konfigurasi Gendou (soal 2 sampai 5) digabung menjadi satu script `/root
 1. **Soal 2 + 3:** menulis `/etc/network/interfaces` berisi IP tiap interface dan rute statis, lalu menerapkannya langsung.
 2. **Soal 4:** rule MASQUERADE.
 3. **Soal 5:** firewall.
-4. Menyimpan semua rule iptables ke `/etc/iptables.rules`.
+4. Menyimpan salinan rule iptables ke `/etc/iptables.rules`.
 
 Script diawali dengan flush chain (`-F`) sebelum menambah rule, sehingga aman dijalankan berulang tanpa rule dobel.
 
@@ -747,18 +749,17 @@ iptables -A FORWARD ! -i eth0 -s $INTERNAL ! -o eth0 -d $INTERNAL -j ACCEPT
 
 Koneksi baru dari sisi NAT1 tidak cocok dengan rule mana pun: bukan balasan, bukan DHCP, dan masuk dari `eth0`. Akibatnya paket tersebut jatuh ke policy `DROP`.
 
-#### 2. Persistensi
+#### 2. Memasang Ulang Rule
 
-Rule disimpan dengan `iptables-save > /etc/iptables.rules`. Stanza `eth0` di `/etc/network/interfaces` memulihkannya setiap kali `eth0` naik:
+Rule iptables disimpan di memori kernel, sehingga hilang setiap kali node Gendou di-restart. Rule MASQUERADE (soal 4) dan firewall (soal 5) dipasang ulang dengan menjalankan script:
 
 ```bash
-auto eth0
-iface eth0 inet dhcp
-    up sysctl -w net.ipv4.ip_forward=1
-    up iptables-restore < /etc/iptables.rules   # soal 4-5
+sh /root/gendo.sh
 ```
 
-Baris ini menggantikan baris `up iptables -t nat ...` dari soal 4, karena `/etc/iptables.rules` sudah memuat rule MASQUERADE.
+Script ini aman dijalankan berulang, dan sekaligus memasang ulang IP serta rute dari soal 2 dan 3.
+
+Script juga menyimpan salinan rule dengan `iptables-save > /etc/iptables.rules` dan menambahkan baris `up iptables-restore < /etc/iptables.rules` pada stanza `eth0`. Baris ini menggantikan baris `up iptables -t nat ...` dari soal 4. Namun pemulihan otomatis ini tidak dapat diandalkan. GNS3 hanya mempertahankan isi `/root` dan `/etc/network` saat container dibuat ulang, sehingga `/etc/iptables.rules` bisa hilang. Karena itu, cara yang dipakai adalah menjalankan ulang `gendo.sh`.
 
 ### Verifikasi
 
@@ -1210,15 +1211,15 @@ iptables -I INPUT 1 -p icmp --icmp-type echo-request -j PING_LIMIT
 * **Ping di bawah batas.** Ping dengan jeda 3 detik selalu mendapat token, karena bucket sudah terisi penuh lagi dalam 1 detik.
 * **Aman dijalankan berulang.** Chain dibersihkan dengan `-F`, dan rule lompat ke chain dihapus dulu dengan `-D` sebelum dipasang lagi.
 
-#### 2. Persistensi
+#### 2. Memasang Ulang Rule
+
+Rule iptables hilang setiap kali node Tokyo3-Core di-restart, karena disimpan di memori kernel. Rule dipasang ulang dengan menjalankan script:
 
 ```bash
-iptables-save > /etc/iptables.rules
-grep -q iptables-restore /etc/network/interfaces ||
-    sed -i '/^iface eth0 inet static/a\    up iptables-restore < /etc/iptables.rules' /etc/network/interfaces
+sh /root/soal_15.sh
 ```
 
-Rule dipulihkan setiap kali `eth0` Tokyo3-Core naik.
+Script ini aman dijalankan berulang. Script juga menyimpan salinan rule ke `/etc/iptables.rules` dan menambahkan baris `up iptables-restore` pada `eth0`, tetapi pemulihan otomatis ini tidak dapat diandalkan karena alasan yang sama dengan soal 5.
 
 #### 3. Pengujian dari `Lilith`
 
