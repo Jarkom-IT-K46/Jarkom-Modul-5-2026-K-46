@@ -1805,3 +1805,154 @@ Chain ISOLASI_KELUAR (1 references)
 Zeruel membuang 6 paket dari Armisael (ping 3 dan SYN 3), serta 5 paket miliknya sendiri menuju Armisael (ping 2 dan SYN 3).
 
 <!-- TODO: tambahkan screenshot uji dari Armisael dan Zeruel serta counter isolasi -->
+
+## Soal 20
+**Uji kebakaran Geofront:** NERV harus bisa dibangun ulang dengan cepat. Pilih tiga node sendiri, minimal satu router. Di tiap node, simpan dulu rule dengan `iptables-save` ke `/root/<nama>.rules`. Lalu hapus semua rule iptables termasuk tabel nat, dan hapus rute yang kamu tambahkan sendiri. Pulihkan rule dengan `iptables-restore`, dan pulihkan rute dengan `/root/<nama>.sh`. Lakukan pemulihan itu dua kali berturut-turut. Hasilnya harus sama: rule dan rute tidak dobel, dan node berfungsi seperti semula. Buktikan jumlah baris `iptables -S` dan `iptables -t nat -S` sama setelah pemulihan pertama dan kedua. Buktikan juga node itu berfungsi lagi.
+
+### Jawaban dan Penjelasan
+
+Tiga router dipilih karena masing-masing punya rule dan rute buatan sendiri:
+
+| Node | Rule | Rute sendiri | Uji fungsi |
+|---|---|---|---|
+| Gendou | MASQUERADE (soal 4) dan firewall `DROP` (soal 5) | 20 rute statis (soal 3) | Lilith ke internet |
+| Fuyutsuki | DNAT Casper ke Pen-Pen (soal 17) | default dan 2 rute (soal 3) | Pesan Casper ke Zeruel sampai di Pen-Pen |
+| Shigeru | `ZONA_GATE` (soal 18) dan isolasi Armisael (soal 19) | default dan 1 rute (soal 3) | Casper bisa, Lilith dan Armisael tidak |
+
+#### 1. Script pemulihan rute `/root/<nama>.sh`
+
+Isinya baris `ip route replace` dari soal 3. Contoh `/root/shigeru.sh`:
+
+```bash
+ip route replace default via 192.234.4.165   # Gendou
+ip route replace 192.234.4.88/29 via 192.234.4.150   # Radar (Makoto)
+```
+
+`ip route replace` membuat rute baru jika belum ada, dan menimpanya jika sudah ada. Script ini aman dijalankan berulang tanpa membuat rute dobel. Script ini hanya berisi rute, dan tidak mengubah IP atau rule.
+
+#### 2. Script uji `/root/soal_20.sh`
+
+```bash
+NAMA=$(hostname | tr 'A-Z' 'a-z')
+RULES=/root/$NAMA.rules
+RUTE=/root/$NAMA.sh
+
+# 1. Simpan
+iptables-save > $RULES
+
+# 2. Hapus semua rule (filter dan nat) dan rute sendiri
+for T in filter nat; do
+    iptables -t $T -F
+    iptables -t $T -X
+done
+for CH in INPUT FORWARD OUTPUT; do iptables -P $CH ACCEPT; done
+grep '^ip route replace' $RUTE | sed 's/#.*//; s/replace/del/' | while read CMD; do $CMD; done
+
+# 3. Pemulihan pertama, 4. pemulihan kedua
+iptables-restore < $RULES
+sh $RUTE > /dev/null
+```
+
+* **`-F`** menghapus semua rule, **`-X`** menghapus chain buatan sendiri (misalnya `ZONA_GATE`), dan policy dikembalikan ke `ACCEPT`, termasuk policy `DROP` di Gendou.
+* **Rute yang dihapus** hanya rute yang tercantum di `/root/<nama>.sh`. Baris `replace` diubah menjadi `del`. Rute connected dan default Gendou dari DHCP NAT1 bukan buatan sendiri, sehingga tidak dihapus.
+* **`iptables-restore` tidak membuat rule dobel.** Perintah ini mengganti seluruh isi tabel dengan isi file, bukan menambahkannya.
+* Setiap tahap mencatat jumlah baris `iptables -S`, `iptables -t nat -S`, dan `ip route`. Isi lengkap setelah pemulihan pertama, kedua, dan kondisi awal juga dibandingkan dengan `cmp`.
+
+Script lengkap ada di `perquest-scripts/soal_20/`. `uji.sh` dijalankan di node sebagai `/root/soal_20.sh`, dan `<nama>.sh` dikirim sebagai `/root/<nama>.sh`.
+
+### Verifikasi
+
+#### 1. Jumlah baris di setiap tahap
+
+**Gendou:**
+
+```
+== 1. Simpan rule ke /root/gendou.rules
+-- awal: iptables -S=10 baris, iptables -t nat -S=5 baris, ip route=30 baris
+== 2. Hapus semua rule (filter dan nat) dan rute sendiri
+-- setelah dihapus: iptables -S=3 baris, iptables -t nat -S=4 baris, ip route=10 baris
+== 3. Pemulihan pertama
+-- pemulihan 1: iptables -S=10 baris, iptables -t nat -S=5 baris, ip route=30 baris
+== 4. Pemulihan kedua
+-- pemulihan 2: iptables -S=10 baris, iptables -t nat -S=5 baris, ip route=30 baris
+== 5. Perbandingan isi
+pemulihan 1 == pemulihan 2
+awal == pemulihan 2
+```
+
+**Fuyutsuki:**
+
+```
+== 1. Simpan rule ke /root/fuyutsuki.rules
+-- awal: iptables -S=3 baris, iptables -t nat -S=5 baris, ip route=7 baris
+== 2. Hapus semua rule (filter dan nat) dan rute sendiri
+-- setelah dihapus: iptables -S=3 baris, iptables -t nat -S=4 baris, ip route=4 baris
+== 3. Pemulihan pertama
+-- pemulihan 1: iptables -S=3 baris, iptables -t nat -S=5 baris, ip route=7 baris
+== 4. Pemulihan kedua
+-- pemulihan 2: iptables -S=3 baris, iptables -t nat -S=5 baris, ip route=7 baris
+== 5. Perbandingan isi
+pemulihan 1 == pemulihan 2
+awal == pemulihan 2
+```
+
+**Shigeru:**
+
+```
+== 1. Simpan rule ke /root/shigeru.rules
+-- awal: iptables -S=17 baris, iptables -t nat -S=4 baris, ip route=5 baris
+== 2. Hapus semua rule (filter dan nat) dan rute sendiri
+-- setelah dihapus: iptables -S=3 baris, iptables -t nat -S=4 baris, ip route=3 baris
+== 3. Pemulihan pertama
+-- pemulihan 1: iptables -S=17 baris, iptables -t nat -S=4 baris, ip route=5 baris
+== 4. Pemulihan kedua
+-- pemulihan 2: iptables -S=17 baris, iptables -t nat -S=4 baris, ip route=5 baris
+== 5. Perbandingan isi
+pemulihan 1 == pemulihan 2
+awal == pemulihan 2
+```
+
+| Node | `iptables -S` (awal / hapus / pulih 1 / pulih 2) | `iptables -t nat -S` | `ip route` |
+|---|---|---|---|
+| Gendou | 10 / 3 / 10 / 10 | 5 / 4 / 5 / 5 | 30 / 10 / 30 / 30 |
+| Fuyutsuki | 3 / 3 / 3 / 3 | 5 / 4 / 5 / 5 | 7 / 4 / 7 / 7 |
+| Shigeru | 17 / 3 / 17 / 17 | 4 / 4 / 4 / 4 | 5 / 3 / 5 / 5 |
+
+Setelah dihapus, `iptables -S` tinggal 3 baris (tiga policy `ACCEPT`) dan `iptables -t nat -S` tinggal 4 baris (empat policy). Jumlah baris setelah pemulihan pertama dan kedua sama, dan isinya identik dengan kondisi awal. Jadi rule dan rute tidak dobel.
+
+#### 2. Node berfungsi lagi
+
+```
+== Gendou: Lilith ke internet
+3 packets transmitted, 3 received, 0% packet loss, time 2219ms
+Connection to 8.8.8.8 53 port [tcp/*] succeeded!
+exit=0
+== Shigeru: Lilith ke Zeruel
+3 packets transmitted, 0 received, 100% packet loss, time 2251ms
+== Shigeru: Casper ke Zeruel
+3 packets transmitted, 3 received, 0% packet loss, time 2222ms
+== Fuyutsuki: Casper ke Zeruel:9000
+Connection to 192.234.4.82 9000 port [tcp/*] succeeded!
+exit=0
+== Shigeru: Armisael ke internet
+3 packets transmitted, 0 received, 100% packet loss, time 2286ms
+```
+
+Log `/root/nc_9000.log` di Pen-Pen:
+
+```
+Connection received on 192.234.4.58 48638
+Pesan Casper setelah pemulihan
+Listening on 0.0.0.0 9000
+```
+
+Log Zeruel tetap hanya berisi `Listening on 0.0.0.0 9000`.
+
+| Node | Fungsi | Hasil |
+|---|---|---|
+| Gendou | NAT dan rute: Lilith ke 8.8.8.8 | Berhasil |
+| Fuyutsuki | DNAT: pesan Casper ke Zeruel sampai di Pen-Pen | Berhasil |
+| Shigeru | `ZONA_GATE`: Casper bisa ping Zeruel, Lilith tidak | Sesuai |
+| Shigeru | Isolasi Armisael: Armisael tidak bisa ke internet | Sesuai |
+
+<!-- TODO: tambahkan screenshot output soal_20.sh di ketiga router dan uji fungsi -->
