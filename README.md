@@ -371,7 +371,7 @@ ping -c 2 192.234.4.114      # Yui (dan seterusnya untuk 7 link lainnya)
 
 ```
 lo               UNKNOWN        127.0.0.1/8
-eth0             UNKNOWN        192.168.122.172/24
+eth0             UNKNOWN        192.168.122.170/24
 eth1             UNKNOWN        192.234.4.105/30
 eth2             UNKNOWN        192.234.4.113/30
 eth3             UNKNOWN        192.234.4.109/30
@@ -382,7 +382,9 @@ eth7             UNKNOWN        192.234.4.165/30
 eth8             UNKNOWN        192.234.4.169/30
 ```
 
-`eth0` mendapat `192.168.122.172/24` dari DHCP NAT1, dan `eth1` sampai `eth8` sudah memiliki IP sesuai tabel. Ping ke NAT1 dan ke tujuh router tetangga (Yui, Hikari, Asuka, Kaji, Misato, Shigeru, Fuyutsuki) menghasilkan 0% packet loss.
+`eth0` mendapat `192.168.122.170/24` dari DHCP NAT1, dan `eth1` sampai `eth8` sudah memiliki IP sesuai tabel. Ping ke NAT1 dan ke tujuh router tetangga (Yui, Hikari, Asuka, Kaji, Misato, Shigeru, Fuyutsuki) menghasilkan 0% packet loss.
+
+![Output soal_2.sh di Gendou](images/soal_2/gendou.png)
 
 #### 2. Verifikasi Link Router ke Router
 
@@ -412,7 +414,42 @@ Ping dijalankan dari kedua ujung setiap link. Seluruh 16 link berhasil dengan 0%
 
 </details>
 
-<!-- TODO: tambahkan screenshot ip -br dan ping dari GNS3 -->
+<details>
+<summary>Screenshot <code>soal_2.sh</code> di 16 router lainnya</summary>
+
+![Output soal_2.sh di Yui](images/soal_2/yui.png)
+
+![Output soal_2.sh di Hikari](images/soal_2/hikari.png)
+
+![Output soal_2.sh di Asuka](images/soal_2/asuka.png)
+
+![Output soal_2.sh di Kaji](images/soal_2/kaji.png)
+
+![Output soal_2.sh di Misato](images/soal_2/misato.png)
+
+![Output soal_2.sh di Shigeru](images/soal_2/shigeru.png)
+
+![Output soal_2.sh di Fuyutsuki](images/soal_2/fuyutsuki.png)
+
+![Output soal_2.sh di Mari](images/soal_2/mari.png)
+
+![Output soal_2.sh di Rei](images/soal_2/rei.png)
+
+![Output soal_2.sh di Shinji](images/soal_2/shinji.png)
+
+![Output soal_2.sh di Kensuke](images/soal_2/kensuke.png)
+
+![Output soal_2.sh di Ritsuko](images/soal_2/ritsuko.png)
+
+![Output soal_2.sh di Maya](images/soal_2/maya.png)
+
+![Output soal_2.sh di Toji](images/soal_2/toji.png)
+
+![Output soal_2.sh di Kaworu](images/soal_2/kaworu.png)
+
+![Output soal_2.sh di Makoto](images/soal_2/makoto.png)
+
+</details>
 
 
 ## Soal 3
@@ -554,8 +591,8 @@ ip route
 <summary>Output <code>ip route</code> di Gendou</summary>
 
 ```
-default via 192.168.122.1 dev eth0 metric 161637
-192.168.122.0/24 dev eth0 proto kernel scope link src 192.168.122.172
+default via 192.168.122.1 dev eth0 metric 17614
+192.168.122.0/24 dev eth0 proto kernel scope link src 192.168.122.170
 192.234.0.0/23 via 192.234.4.114 dev eth2
 192.234.2.0/24 via 192.234.4.110 dev eth3
 192.234.3.0/25 via 192.234.4.114 dev eth2
@@ -590,6 +627,8 @@ default via 192.168.122.1 dev eth0 metric 161637
 
 Rute `192.234.4.112/28` (ringkasan) dan `192.234.4.112/30` (terhubung langsung) muncul bersamaan. Kernel memilih rute dengan prefix terpanjang, sehingga paket ke Yui tetap lewat link langsung, sedangkan paket ke L3–L5 lewat rute ringkasan.
 
+![Output soal_3.sh di Gendou](images/soal_3/gendou.png)
+
 #### 2. Ping dari `Armisael`
 
 ```bash
@@ -606,7 +645,7 @@ ping -c 3 192.234.2.2     # Comm-Net
 
 Ketiga ping berhasil, sehingga routing statis dari cabang Shigeru ke cabang Fuyutsuki, Asuka, dan Hikari sudah benar.
 
-<!-- TODO: tambahkan screenshot ip route dan ping dari GNS3 -->
+![Output soal_3.sh di Armisael](images/soal_3/armisael.png)
 
 
 ## Soal 4
@@ -674,6 +713,10 @@ ping -c 3 deb.debian.org
 
 Ping ke `deb.debian.org` berhasil, artinya nama domain berhasil di-resolve dan paket keluar ke internet lewat NAT di Gendou.
 
+![Output soal_4.sh di Armisael](images/soal_4/armisael.png)
+
+![Output soal_4.sh di Lilith](images/soal_4/lilith.png)
+
 #### 2. Counter Rule NAT di `Gendou`
 
 ```bash
@@ -684,18 +727,18 @@ Counter pada tabel `nat` hanya bertambah satu kali untuk setiap koneksi baru, bu
 
 | Langkah | Counter (pkts / bytes) |
 |---|---|
-| Sebelum pengujian | `40 / 2684` |
-| Setelah `ping -c 3 192.234.4.74` (Lilith, antar-LAN) | `40 / 2684` (tidak berubah) |
-| Setelah `ping -c 3 8.8.8.8` (internet) | `41 / 2768` (bertambah 1 koneksi) |
+| Sebelum pengujian | `48 / 3288` |
+| Setelah `ping -c 3 192.234.4.74` (Lilith, antar-LAN) | `48 / 3288` (tidak berubah) |
+| Setelah `ping -c 3 8.8.8.8` (internet) | `49 / 3372` (bertambah 1 koneksi) |
 
 ```
 pkts bytes target     prot opt in     out     source               destination
-  41  2768 MASQUERADE  all  --  *      eth0    192.234.0.0/16       0.0.0.0/0
+  49  3372 MASQUERADE  all  --  *      eth0    192.234.0.0/16       0.0.0.0/0
 ```
 
 Counter tidak berubah saat Armisael ping Lilith, sehingga traffic antar-LAN tidak diterjemahkan dan tetap membawa alamat asli `192.234.4.83`. Counter bertambah saat Armisael ping `8.8.8.8`, sehingga hanya traffic ke internet yang diterjemahkan.
 
-<!-- TODO: tambahkan screenshot ping dan counter NAT dari GNS3 -->
+![Counter MASQUERADE di Gendou sebelum dan sesudah pengujian](images/soal_4/gendou-nat.png)
 
 
 ## Soal 5
@@ -784,11 +827,13 @@ $ iptables -t nat -S POSTROUTING
 -A POSTROUTING -s 192.234.0.0/16 -o eth0 -j MASQUERADE
 ```
 
+![Output gendo.sh di Gendou](images/soal_5/gendou.png)
+
 #### 2. Soal 2 sampai 4 tetap jalan
 
 | Uji | Hasil |
 |---|---|
-| `udhcpc` di `eth0` Gendou | Lease `192.168.122.172` dari `192.168.122.1` diperoleh (DHCP tetap jalan) |
+| `udhcpc` di `eth0` Gendou | Lease `192.168.122.170` dari `192.168.122.1` diperoleh (DHCP tetap jalan) |
 | Armisael `ping 8.8.8.8` | 3/3 diterima, 0% loss (internet, rule b) |
 | Armisael `ping deb.debian.org` | 3/3 diterima, 0% loss (DNS + internet) |
 | Armisael `ping 192.234.4.74` (Lilith) | 3/3 diterima, 0% loss (antar-LAN, rule c) |
@@ -805,7 +850,7 @@ Chain FORWARD (policy DROP 0 packets, 0 bytes)
     9   756 ACCEPT     all  --  !eth0  !eth0   192.234.0.0/16       192.234.0.0/16
 ```
 
-<!-- TODO: tambahkan screenshot iptables -S di Gendou dan ping 8.8.8.8 dari Armisael -->
+![Ping dari Armisael ke internet, Lilith, dan Gendou](images/soal_5/armisael.png)
 
 ## Soal 6
 **Alamat para pilot:** jaringan sudah hidup, tapi para pilot dan staf tidak tahu alamat mereka sendiri. Unit-01 bahkan tidak tahu siapa gateway-nya. Beri IP statis dan gateway ke semua node non-router, sesuai aturan alamat di glosarium. Simpan agar bertahan setelah restart. Tunjukkan `ip -br` dan ping ke gateway di Unit-01.
@@ -901,6 +946,8 @@ PING 192.234.4.65 (192.234.4.65) 56(84) bytes of data.
 
 `eth0` Unit-01 memakai `192.234.4.66/29`, dan gateway Misato (`192.234.4.65`) menjawab ping.
 
+![ip -br addr dan ping ke gateway di Unit-01](images/soal_6/unit-01.png)
+
 #### 2. Seluruh node non-router
 
 Setiap node diperiksa dengan `ip -4 -br addr show eth0` dan `ping -c 3 <gateway>`.
@@ -939,8 +986,6 @@ Tokyo3-Core     192.234.4.106/30   gw 192.234.4.105  recv 3/3
 </details>
 
 Delapan router (Asuka, Kaji, Kaworu, Makoto, Mari, Maya, Ritsuko, Shinji) sempat berstatus stopped di GNS3. Setelah dinyalakan ulang, IP dan rute dari soal 2 dan 3 langsung aktif kembali tanpa konfigurasi ulang. Ini membuktikan konfigurasi di `/etc/network/interfaces` bertahan setelah restart.
-
-<!-- TODO: tambahkan screenshot ip -br dan ping ke gateway di Unit-01 -->
 
 ## Soal 7
 **Membangunkan MAGI:** Casper, Balthasar, dan Melchior di Switch-Terminal menunggu diaktifkan. Ritsuko ingin ketiganya melayani dulu, urusan keamanan dibahas nanti. Pasang iptables dan netcat-traditional lewat `/root/<nama>.sh`, lalu nyalakan listener sesuai port di glosarium. Dari Lilith, kirim pesan ke ketiganya dan ke port 5001 Balthasar. Tampilkan pesan yang diterima di tiap node.
@@ -1033,6 +1078,8 @@ Ketiga node MAGI menampilkan hasil `dpkg -l` yang sama.
 192.234.4.60:5000 exit=0
 ```
 
+![Pengiriman pesan dari Lilith](images/soal_7/lilith.png)
+
 #### 3. Pesan yang diterima di tiap node
 
 **Magi-Casper** (`/root/nc_5000.log`):
@@ -1071,7 +1118,11 @@ listening on [any] 5000 ...
 
 Setiap pesan tercatat dari `192.234.4.74` (Lilith). Baris `listening on` kedua menunjukkan listener langsung siap menerima koneksi berikutnya.
 
-<!-- TODO: tambahkan screenshot pengiriman dari Lilith dan log di tiap MAGI -->
+![Paket, listener, dan log di Magi-Casper](images/soal_7/magi-casper.png)
+
+![Paket, listener, dan log di Magi-Balthasar](images/soal_7/magi-balthasar.png)
+
+![Paket, listener, dan log di Magi-Melchior](images/soal_7/magi-melchior.png)
 
 ## Soal 8
 **Mengenali kondisi normal:** Pen-Pen dan Tokyo3-Core sudah ditandai sebagai calon sasaran pertama SEELE. Sebelum dilindungi, keduanya harus melayani dulu agar kamu tahu kondisi normalnya. Koneksi ke port 80 dijawab `Welcome to {hostname}`. Koneksi ke port 8080 di Tokyo3-Core dijawab `syifa imutz`. Tunjukkan nc dari Lilith ke ketiga port itu. Tunjukkan juga bahwa port yang tidak dilayani, misalnya 22, langsung gagal, bukan menggantung.
@@ -1145,7 +1196,7 @@ Connection to 192.234.4.106 8080 port [tcp/*] succeeded!
 syifa imutz
 == 192.234.3.195:22 exit=1 durasi=3ms
 nc: connect to 192.234.3.195 port 22 (tcp) failed: Connection refused
-== 192.234.4.106:22 exit=1 durasi=4ms
+== 192.234.4.106:22 exit=1 durasi=3ms
 nc: connect to 192.234.4.106 port 22 (tcp) failed: Connection refused
 ```
 
@@ -1155,9 +1206,11 @@ nc: connect to 192.234.4.106 port 22 (tcp) failed: Connection refused
 | Tokyo3-Core:80 | 0 | 5 ms | `Welcome to Tokyo3-Core` |
 | Tokyo3-Core:8080 | 0 | 6 ms | `syifa imutz` |
 | Pen-Pen:22 | 1 | 3 ms | `Connection refused`, langsung gagal |
-| Tokyo3-Core:22 | 1 | 4 ms | `Connection refused`, langsung gagal |
+| Tokyo3-Core:22 | 1 | 3 ms | `Connection refused`, langsung gagal |
 
-Port 22 gagal dalam 3 sampai 4 ms, jauh di bawah batas 5000 ms, jadi koneksi langsung ditolak dan tidak menggantung.
+Port 22 gagal dalam 3 ms, jauh di bawah batas 5000 ms, jadi koneksi langsung ditolak dan tidak menggantung.
+
+![nc dari Lilith ke port 80, 8080, dan 22](images/soal_8/lilith.png)
 
 #### 2. Log di server
 
@@ -1185,7 +1238,9 @@ Listening on 0.0.0.0 8080
 
 Setiap koneksi tercatat dari `192.234.4.74` (Lilith), dan listener langsung siap lagi untuk koneksi berikutnya.
 
-<!-- TODO: tambahkan screenshot nc dari Lilith ke port 80, 8080, dan 22 -->
+![Log nc di Pen-Pen](images/soal_8/pen-pen.png)
+
+![Log nc di Tokyo3-Core](images/soal_8/tokyo3-core.png)
 
 ## Soal 15
 **Banjir ping di pusat komando:** Instrumentality makin dekat, dan semua orang berebut mem-ping Tokyo3-Core. Banjir ping bisa melumpuhkannya. Batasi Tokyo3-Core agar hanya menjawab maksimal 5 ping per detik, dan buang kelebihannya. Aturan ini tidak boleh mengganggu ping di bawah batas. Aturan ini juga tidak boleh membatasi ping yang dikirim Tokyo3-Core sendiri. Pastikan rule benar-benar mengenai paket yang dituju. Periksa urutan rule dan jenis paketnya. Buktikan ping rapat dari Lilith, misalnya `ping -i 0.1 -c50`, sebagian hilang, dan tunjukkan counter rule pembuangan naik. Buktikan ping biasa semuanya berhasil, dengan jeda minimal 3 detik di antaranya.
