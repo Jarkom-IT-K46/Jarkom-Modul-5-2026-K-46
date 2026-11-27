@@ -1303,20 +1303,24 @@ $ iptables -S
 -A PING_LIMIT -j DROP
 ```
 
+![Rule dan reset counter di Tokyo3-Core](images/soal_15/tokyo3-core-rule.png)
+
 #### 2. Ping dari `Lilith`
 
 Counter direset dengan `iptables -Z` sebelum pengujian.
 
 ```
 == ping rapat: 10 ping/detik, sebagian harus hilang
-50 packets transmitted, 30 received, 40% packet loss, time 5650ms
-rtt min/avg/max/mdev = 0.491/0.872/1.381/0.233 ms
+50 packets transmitted, 30 received, 40% packet loss, time 5072ms
+rtt min/avg/max/mdev = 0.570/1.048/1.877/0.279 ms
 == ping biasa: jeda 3 detik, semua harus berhasil
-5 packets transmitted, 5 received, 0% packet loss, time 13369ms
-rtt min/avg/max/mdev = 0.416/0.692/1.240/0.283 ms
+5 packets transmitted, 5 received, 0% packet loss, time 12030ms
+rtt min/avg/max/mdev = 0.655/0.806/1.107/0.176 ms
 ```
 
-Ping rapat berlangsung sekitar 5,6 detik. Yang dijawab hanya 30 ping, yaitu 5 dari burst awal ditambah kira-kira 5 per detik. 20 ping lainnya dibuang.
+Ping rapat berlangsung sekitar 5,1 detik. Yang dijawab hanya 30 ping, yaitu 5 dari burst awal ditambah kira-kira 5 per detik. 20 ping lainnya dibuang.
+
+![Ping rapat dan ping biasa dari Lilith](images/soal_15/lilith.png)
 
 #### 3. Counter rule
 
@@ -1341,12 +1345,12 @@ Counter `DROP` naik tepat sebanyak ping rapat yang hilang (50 - 30 = 20), dan ti
 
 ```
 $ ping -c 3 192.234.4.74
-3 packets transmitted, 3 received, 0% packet loss, time 2269ms
+3 packets transmitted, 3 received, 0% packet loss, time 2003ms
 ```
 
 Counter `INPUT` tetap 55 (50 + 5 dari Lilith) setelah ping ini. Balasan `echo-reply` dari Lilith tidak masuk ke `PING_LIMIT`, sehingga ping keluar Tokyo3-Core tidak terkena batas.
 
-<!-- TODO: tambahkan screenshot ping rapat dari Lilith dan counter iptables di Tokyo3-Core -->
+![Counter PING_LIMIT dan ping keluar dari Tokyo3-Core](images/soal_15/tokyo3-core-counter.png)
 
 ## Soal 16
 **Pencuri yang mencoba setiap pintu:** dari Switch-Lab, Dummy-Plug mengetuk port sensitif Tokyo3-Core satu per satu seperti pencuri. Ritsuko ingin tahu setiap percobaannya, dan pintunya harus dibanting. Setiap koneksi TCP dari Dummy-Plug ke port 22, 23, dan 3306 di Tokyo3-Core harus dicatat di log dengan prefix huruf besar `SCAN-NERV:`, lalu ditolak seketika. Port 80 dan 8080 tetap bisa diakses, dan klien lain tidak boleh terganggu. Buktikan `nc -w` dari Dummy-Plug ke port 22, 23, dan 3306 langsung ditolak, dan ke port 80 dan 8080 berhasil. Tunjukkan counter rule pencatatan, karena log kernel sering tidak terlihat di container.
@@ -1406,25 +1410,29 @@ Script lengkap ada di `perquest-scripts/soal_16/` dan dijalankan di node sebagai
 #### 1. `nc` dari `Dummy-Plug`
 
 ```
-== 192.234.4.106:22 exit=1 durasi=3ms
+== 192.234.4.106:22 exit=1 durasi=5ms
 nc: connect to 192.234.4.106 port 22 (tcp) failed: Connection refused
-== 192.234.4.106:23 exit=1 durasi=2ms
+== 192.234.4.106:23 exit=1 durasi=3ms
 nc: connect to 192.234.4.106 port 23 (tcp) failed: Connection refused
 == 192.234.4.106:3306 exit=1 durasi=3ms
 nc: connect to 192.234.4.106 port 3306 (tcp) failed: Connection refused
 == 192.234.4.106:80 exit=0 durasi=3ms
 Connection to 192.234.4.106 80 port [tcp/*] succeeded!
 Welcome to Tokyo3-Core
-== 192.234.4.106:8080 exit=0 durasi=3ms
+== 192.234.4.106:8080 exit=0 durasi=4ms
 Connection to 192.234.4.106 8080 port [tcp/*] succeeded!
 syifa imutz
 ```
 
-Port 22, 23, dan 3306 ditolak dalam 2 sampai 3 ms, jauh di bawah batas `-w 5`. Port 80 dan 8080 tetap menjawab.
+Port 22, 23, dan 3306 ditolak dalam 3 sampai 5 ms, jauh di bawah batas `-w 5`. Port 80 dan 8080 tetap menjawab.
+
+![nc dari Dummy-Plug ke Tokyo3-Core](images/soal_16/dummy-plug.png)
 
 #### 2. Counter rule pencatatan
 
 Counter direset dengan `iptables -Z` sebelum pengujian. Setelah Dummy-Plug mengetuk:
+
+![Rule dan reset counter di Tokyo3-Core](images/soal_16/tokyo3-core-rule.png)
 
 ```
 Chain SCAN_NERV (1 references)
@@ -1435,21 +1443,23 @@ num      pkts      bytes target     prot opt in     out     source              
 
 Rule `LOG` naik 3, satu untuk setiap port 22, 23, dan 3306. Rule `REJECT` juga naik 3, sehingga setiap percobaan dicatat lalu ditolak. Seperti yang disebut soal, baris log `SCAN-NERV:` tidak muncul di `dmesg` container, sehingga counter inilah buktinya.
 
+![Counter SCAN_NERV setelah Dummy-Plug mengetuk](images/soal_16/tokyo3-core-scan.png)
+
 #### 3. Klien lain tidak terganggu
 
 `Lilith` menjalankan pengujian yang sama:
 
 ```
-== 192.234.4.106:22 exit=1 durasi=5ms
+== 192.234.4.106:22 exit=1 durasi=4ms
 nc: connect to 192.234.4.106 port 22 (tcp) failed: Connection refused
-== 192.234.4.106:23 exit=1 durasi=4ms
+== 192.234.4.106:23 exit=1 durasi=3ms
 nc: connect to 192.234.4.106 port 23 (tcp) failed: Connection refused
 == 192.234.4.106:3306 exit=1 durasi=3ms
 nc: connect to 192.234.4.106 port 3306 (tcp) failed: Connection refused
-== 192.234.4.106:80 exit=0 durasi=3ms
+== 192.234.4.106:80 exit=0 durasi=4ms
 Connection to 192.234.4.106 80 port [tcp/*] succeeded!
 Welcome to Tokyo3-Core
-== 192.234.4.106:8080 exit=0 durasi=3ms
+== 192.234.4.106:8080 exit=0 durasi=4ms
 Connection to 192.234.4.106 8080 port [tcp/*] succeeded!
 syifa imutz
 ```
@@ -1458,11 +1468,16 @@ syifa imutz
 Chain INPUT (policy ACCEPT 19 packets, 1044 bytes)
 num      pkts      bytes target     prot opt in     out     source               destination
 1           3      180 SCAN_NERV  tcp  --  *      *       192.234.4.51         0.0.0.0/0            multiport dports 22,23,3306 ctstate NEW
+2           0        0 PING_LIMIT  icmp --  *      *       0.0.0.0/0            0.0.0.0/0            icmptype 8
 ```
+
+Rule kedua adalah `PING_LIMIT` dari soal 15, sehingga rule `SCAN_NERV` tetap berada di posisi pertama.
 
 Counter tetap 3 setelah Lilith mengetuk, sehingga Lilith tidak tercatat. Port 22, 23, dan 3306 tetap gagal untuk Lilith karena memang tidak ada layanan di port itu, dan kernel membalas RST. Port 80 dan 8080 tetap berhasil.
 
-<!-- TODO: tambahkan screenshot nc dari Dummy-Plug dan counter SCAN_NERV di Tokyo3-Core -->
+![nc dari Lilith ke Tokyo3-Core](images/soal_16/lilith.png)
+
+![Counter INPUT setelah Lilith mengetuk](images/soal_16/tokyo3-core-input.png)
 
 ## Soal 17
 **Sihir hitam di jalur paket:** Ritsuko meninggalkan memo di meja Gendo. Paket dari Casper ke Zeruel tidak pernah sampai ke Zeruel, karena ada router yang diam-diam mengalihkannya ke tempat lain. "Cari saja router yang menjadi gateway Switch-Terminal." Gendo menyuruhmu meniru router yang diam-diam itu untuk menjebak siapa pun. Di Fuyutsuki, alihkan setiap koneksi TCP dari Magi-Casper ke Zeruel supaya sampai di Pen-Pen. Casper tidak boleh sadar. Balasan yang ia terima harus tetap terlihat datang dari Zeruel. Ping tidak dialihkan. Nyalakan listener port 9000 di Pen-Pen dan Zeruel. Dari Casper, kirim pesan ke IP Zeruel port 9000. Buktikan pesan itu muncul di Pen-Pen, bukan di Zeruel. Tunjukkan juga tabel conntrack di Fuyutsuki.
@@ -1509,10 +1524,12 @@ Polanya sama dengan soal 8. `-d` membuat `nc` hanya menerima tanpa membaca stdin
 #### 3. Pengirim di `Magi-Casper`
 
 ```bash
-echo "Pesan rahasia Casper untuk Zeruel" | nc -v -n -N -w 3 192.234.4.82 9000
+echo "Pesan rahasia Casper untuk Zeruel" | nc.openbsd -v -n -N -w 3 192.234.4.82 9000
 echo "exit=$?"
 ping -c 3 192.234.4.82
 ```
+
+`nc.openbsd` dipanggil langsung karena soal 7 mengarahkan `nc` di MAGI ke `nc.traditional`, yang tidak mengenal opsi `-N`.
 
 Script lengkap ada di `perquest-scripts/soal_17/` dan dijalankan di node sebagai `/root/soal_17.sh`. Tabel conntrack dan counter dikosongkan dulu (`conntrack -F`, `iptables -t nat -Z PREROUTING`) sebelum pengujian.
 
@@ -1523,10 +1540,12 @@ Script lengkap ada di `perquest-scripts/soal_17/` dan dijalankan di node sebagai
 ```
 Connection to 192.234.4.82 9000 port [tcp/*] succeeded!
 exit=0
-3 packets transmitted, 3 received, 0% packet loss, time 2237ms
+3 packets transmitted, 3 received, 0% packet loss, time 2075ms
 ```
 
 Casper melihat koneksinya berhasil ke `192.234.4.82` (Zeruel), dan ping ke Zeruel tetap dijawab.
+
+![Pengiriman dari Magi-Casper ke Zeruel](images/soal_17/magi-casper.png)
 
 #### 2. Pesan muncul di `Pen-Pen`, bukan di `Zeruel`
 
@@ -1534,7 +1553,7 @@ Casper melihat koneksinya berhasil ke `192.234.4.82` (Zeruel), dan ping ke Zerue
 
 ```
 Listening on 0.0.0.0 9000
-Connection received on 192.234.4.58 51360
+Connection received on 192.234.4.58 52414
 Pesan rahasia Casper untuk Zeruel
 Listening on 0.0.0.0 9000
 ```
@@ -1547,14 +1566,18 @@ Listening on 0.0.0.0 9000
 
 Pesan dari Casper (`192.234.4.58`) diterima Pen-Pen, sedangkan Zeruel tidak menerima koneksi apa pun.
 
+![Log port 9000 di Pen-Pen](images/soal_17/pen-pen.png)
+
+![Log port 9000 di Zeruel](images/soal_17/zeruel.png)
+
 #### 3. Tabel conntrack di `Fuyutsuki`
 
 ```
 $ conntrack -L -p tcp
-tcp      6 117 TIME_WAIT src=192.234.4.58 dst=192.234.4.82 sport=51360 dport=9000 src=192.234.3.195 dst=192.234.4.58 sport=9000 dport=51360 [ASSURED] mark=0 use=1
+tcp      6 95 TIME_WAIT src=192.234.4.58 dst=192.234.4.82 sport=52414 dport=9000 src=192.234.3.195 dst=192.234.4.58 sport=9000 dport=52414 [ASSURED] mark=0 use=1
 
 $ conntrack -L -p icmp
-icmp     1 29 src=192.234.4.58 dst=192.234.4.82 type=8 code=0 id=389 src=192.234.4.82 dst=192.234.4.58 type=0 code=0 id=389 mark=0 use=1
+icmp     1 6 src=192.234.4.58 dst=192.234.4.82 type=8 code=0 id=2620 src=192.234.4.82 dst=192.234.4.58 type=0 code=0 id=2620 mark=0 use=1
 ```
 
 Setiap entri conntrack berisi dua arah, yaitu arah asli lalu arah balasan yang diharapkan:
@@ -1572,7 +1595,7 @@ num      pkts      bytes target     prot opt in     out     source              
 
 Counter DNAT hanya bertambah 1, yaitu paket SYN pembuka koneksi TCP. Paket berikutnya ditangani conntrack. Paket ping pertama (84 byte) tercatat di policy `ACCEPT`, bukan di rule DNAT.
 
-<!-- TODO: tambahkan screenshot log Pen-Pen dan Zeruel serta conntrack -L di Fuyutsuki -->
+![Tabel conntrack dan counter DNAT di Fuyutsuki](images/soal_17/fuyutsuki.png)
 
 ## Soal 18
 **Gerbang Monolith dan Radar:** Monolith dan Radar menyimpan rahasia terbesar NERV, dan Shigeru menjaganya tanpa kompromi. Pasang aturan di Shigeru. Node di dalam zona boleh memulai koneksi ke mana saja, dan balasannya tetap sampai. Node di luar zona tidak boleh memulai koneksi ke dalam zona. Satu pengecualian: ping dari subnet Terminal boleh masuk. Tolak berdasarkan arah datangnya, yaitu semua yang datang dari sisi Shigeru yang menghadap Gendo. Jangan menulis subnet luar satu per satu, supaya subnet baru langsung ikut terblokir. Buktikan ping Casper ke Zeruel berhasil, sedangkan ping Lilith ke Zeruel gagal.
@@ -1625,12 +1648,17 @@ Lilith masih bisa menjangkau zona:
 
 ```
 == ping Zeruel (Monolith)
-3 packets transmitted, 3 received, 0% packet loss, time 2224ms
+3 packets transmitted, 3 received, 0% packet loss, time 2002ms
+rtt min/avg/max/mdev = 1.074/1.149/1.238/0.067 ms
 == ping Radar-Array (Radar)
-3 packets transmitted, 3 received, 0% packet loss, time 2278ms
+3 packets transmitted, 3 received, 0% packet loss, time 2019ms
+rtt min/avg/max/mdev = 0.727/0.973/1.428/0.321 ms
 == nc Zeruel port 9000
 Connection to 192.234.4.82 9000 port [tcp/*] succeeded!
+exit=0
 ```
+
+![Lilith sebelum rule dipasang](images/soal_18/lilith-sebelum.png)
 
 #### 2. Setelah rule dipasang
 
@@ -1638,37 +1666,48 @@ Connection to 192.234.4.82 9000 port [tcp/*] succeeded!
 
 ```
 == ping Zeruel (Monolith)
-3 packets transmitted, 3 received, 0% packet loss, time 2233ms
+3 packets transmitted, 3 received, 0% packet loss, time 2024ms
+rtt min/avg/max/mdev = 0.917/1.061/1.240/0.134 ms
 == ping Radar-Array (Radar)
-3 packets transmitted, 3 received, 0% packet loss, time 2223ms
+3 packets transmitted, 3 received, 0% packet loss, time 2043ms
+rtt min/avg/max/mdev = 0.659/0.815/1.004/0.142 ms
 ```
+
+![Ping dari Magi-Casper setelah rule dipasang](images/soal_18/magi-casper.png)
 
 **Lilith** (luar zona):
 
 ```
 == ping Zeruel (Monolith)
-3 packets transmitted, 0 received, 100% packet loss, time 2279ms
+3 packets transmitted, 0 received, 100% packet loss, time 2057ms
 == ping Radar-Array (Radar)
-3 packets transmitted, 0 received, 100% packet loss, time 2253ms
+3 packets transmitted, 0 received, 100% packet loss, time 2030ms
 == nc Zeruel port 9000
 nc: connect to 192.234.4.82 port 9000 (tcp) timed out: Operation in progress
 exit=1
 ```
 
+![Lilith setelah rule dipasang](images/soal_18/lilith-sesudah.png)
+
 **Zeruel** (dalam zona):
 
 ```
 == ping 8.8.8.8 (internet)
-3 packets transmitted, 3 received, 0% packet loss, time 2220ms
+3 packets transmitted, 3 received, 0% packet loss, time 2003ms
+rtt min/avg/max/mdev = 21.662/22.058/22.639/0.419 ms
 == ping Lilith
-3 packets transmitted, 3 received, 0% packet loss, time 2278ms
+3 packets transmitted, 3 received, 0% packet loss, time 2085ms
+rtt min/avg/max/mdev = 0.645/0.799/0.928/0.117 ms
 == nc Tokyo3-Core port 80
 Connection to 192.234.4.106 80 port [tcp/*] succeeded!
 Welcome to Tokyo3-Core
 exit=0
 == ping Radar-Array (sesama zona)
-3 packets transmitted, 3 received, 0% packet loss, time 2223ms
+3 packets transmitted, 3 received, 0% packet loss, time 2043ms
+rtt min/avg/max/mdev = 0.751/0.766/0.791/0.017 ms
 ```
+
+![Zeruel memulai koneksi dari dalam zona](images/soal_18/zeruel.png)
 
 Ping Casper ke Zeruel berhasil, sedangkan ping Lilith ke Zeruel gagal. Zeruel tetap bisa memulai koneksi ke luar dan menerima balasannya. Lilith gagal membalas ke zona hanya untuk koneksi yang ia mulai sendiri. Saat Zeruel yang memulai ping ke Lilith, balasan Lilith lolos sebagai `ESTABLISHED`.
 
@@ -1688,7 +1727,7 @@ num      pkts      bytes target     prot opt in     out     source              
 | Ping Terminal | 2 | Request pertama dari dua ping Casper (ke Zeruel dan Radar-Array) |
 | `DROP` | 9 | 6 ping Lilith dan 3 percobaan SYN dari `nc` Lilith |
 
-<!-- TODO: tambahkan screenshot ping Casper dan Lilith ke Zeruel serta counter ZONA_GATE -->
+![Counter ZONA_GATE di Shigeru](images/soal_18/shigeru.png)
 
 ## Soal 19
 **Hukuman untuk sang pengkhianat:** hitung mundur tinggal beberapa menit. Armisael tidak boleh lagi bicara dengan siapa pun, tapi Zeruel di sebelahnya tidak boleh ikut terhukum. Blokir semua lalu lintas masuk dan keluar Armisael, termasuk ke gateway dan tetangga satu switch. Isolasi tidak boleh dikerjakan di dalam Armisael, karena pengkhianat tidak bisa dipercaya. Untuk uji nc, nyalakan listener TCP 9000 di Armisael, Zeruel, dan Lilith. Ke Seele pakai TCP 53. Buktikan ping dan nc dari Armisael ke Seele, Zeruel, dan Lilith gagal. Buktikan ping dan nc dari Zeruel ke Seele dan Lilith berhasil.
@@ -1779,50 +1818,56 @@ Script lengkap ada di `perquest-scripts/soal_19/` dan dijalankan di node sebagai
 -P FORWARD ACCEPT
 -P OUTPUT ACCEPT
 == ping Seele 8.8.8.8
-3 packets transmitted, 0 received, 100% packet loss, time 2281ms
+3 packets transmitted, 0 received, 100% packet loss, time 2046ms
 == nc Seele 8.8.8.8:53
 nc: connect to 8.8.8.8 port 53 (tcp) timed out: Operation in progress
 exit=1
 == ping Zeruel
-3 packets transmitted, 0 received, 100% packet loss, time 2258ms
+3 packets transmitted, 0 received, 100% packet loss, time 2032ms
 == nc Zeruel:9000
 nc: connect to 192.234.4.82 port 9000 (tcp) timed out: Operation in progress
 exit=1
 == ping Lilith
-3 packets transmitted, 0 received, 100% packet loss, time 2259ms
+3 packets transmitted, 0 received, 100% packet loss, time 2032ms
 == nc Lilith:9000
 nc: connect to 192.234.4.74 port 9000 (tcp) timed out: Operation in progress
 exit=1
 == ping gateway Shigeru
-3 packets transmitted, 0 received, 100% packet loss, time 2258ms
+3 packets transmitted, 0 received, 100% packet loss, time 2035ms
 ```
 
 Tiga baris pertama menunjukkan Armisael sendiri tidak punya rule iptables, jadi isolasi tidak dikerjakan di dalam Armisael.
+
+![Uji dari Armisael](images/soal_19/armisael.png)
 
 #### 2. Dari `Zeruel`: Seele dan Lilith berhasil
 
 ```
 == ping Seele 8.8.8.8
-3 packets transmitted, 3 received, 0% packet loss, time 2219ms
+3 packets transmitted, 3 received, 0% packet loss, time 2003ms
 == nc Seele 8.8.8.8:53
 Connection to 8.8.8.8 53 port [tcp/*] succeeded!
 exit=0
 == ping Lilith
-3 packets transmitted, 3 received, 0% packet loss, time 2249ms
+3 packets transmitted, 3 received, 0% packet loss, time 2037ms
 == nc Lilith:9000
 Connection to 192.234.4.74 9000 port [tcp/*] succeeded!
 exit=0
 ```
 
+![Uji dari Zeruel](images/soal_19/zeruel.png)
+
 Zeruel juga tidak bisa menjangkau Armisael, karena hubungan dengan Armisael diputus dari dua arah:
 
 ```
 $ ping -c 2 -W 2 192.234.4.83
-2 packets transmitted, 0 received, 100% packet loss, time 1135ms
+2 packets transmitted, 0 received, 100% packet loss, time 1061ms
 $ echo x | nc -v -n -N -w 3 192.234.4.83 9000
 nc: connect to 192.234.4.83 port 9000 (tcp) timed out: Operation in progress
 exit=1
 ```
+
+![Zeruel mencoba menghubungi Armisael](images/soal_19/zeruel-ke-armisael.png)
 
 #### 3. Log listener
 
@@ -1831,6 +1876,12 @@ exit=1
 | Lilith | `Connection received on 192.234.4.82` lalu `Halo dari Zeruel` (pesan Armisael tidak ada) |
 | Zeruel | Hanya `Listening on 0.0.0.0 9000` (pesan Armisael tidak sampai) |
 | Armisael | Hanya `Listening on 0.0.0.0 9000` (pesan Zeruel tidak sampai) |
+
+![Log port 9000 di Lilith](images/soal_19/log-lilith.png)
+
+![Log port 9000 di Zeruel](images/soal_19/log-zeruel.png)
+
+![Log port 9000 di Armisael](images/soal_19/log-armisael.png)
 
 #### 4. Counter
 
@@ -1844,6 +1895,8 @@ Chain ISOLASI_MASUK (2 references)
 ```
 
 15 paket dari Armisael dibuang berdasarkan MAC: ping Seele (3), SYN ke port 53 (3), ping Lilith (3), SYN ke Lilith (3), dan ping gateway (3).
+
+![Counter isolasi di Shigeru](images/soal_19/shigeru-counter.png)
 
 **Zeruel:**
 
@@ -1859,7 +1912,7 @@ Chain ISOLASI_KELUAR (1 references)
 
 Zeruel membuang 6 paket dari Armisael (ping 3 dan SYN 3), serta 5 paket miliknya sendiri menuju Armisael (ping 2 dan SYN 3).
 
-<!-- TODO: tambahkan screenshot uji dari Armisael dan Zeruel serta counter isolasi -->
+![Counter isolasi di Zeruel](images/soal_19/zeruel-counter.png)
 
 ## Soal 20
 **Uji kebakaran Geofront:** NERV harus bisa dibangun ulang dengan cepat. Pilih tiga node sendiri, minimal satu router. Di tiap node, simpan dulu rule dengan `iptables-save` ke `/root/<nama>.rules`. Lalu hapus semua rule iptables termasuk tabel nat, dan hapus rute yang kamu tambahkan sendiri. Pulihkan rule dengan `iptables-restore`, dan pulihkan rute dengan `/root/<nama>.sh`. Lakukan pemulihan itu dua kali berturut-turut. Hasilnya harus sama: rule dan rute tidak dobel, dan node berfungsi seperti semula. Buktikan jumlah baris `iptables -S` dan `iptables -t nat -S` sama setelah pemulihan pertama dan kedua. Buktikan juga node itu berfungsi lagi.
